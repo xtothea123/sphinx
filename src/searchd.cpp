@@ -137,6 +137,7 @@ static CSphString		g_sLogFile;								// log file name
 static bool				g_bLogTty			= false;			// cached isatty(g_iLogFile)
 static bool				g_bLogStdout		= true;				// extra copy of startup log messages to stdout; true until around "accepting connections", then MUST be false
 static LogFormat_e		g_eLogFormat		= LOG_FORMAT_PLAIN;
+static int              g_eLogExtended      = 0;
 static bool				g_bLogCompactIn		= false;			// whether to cut list in IN() clauses.
 static int				g_iQueryLogMinMsec	= 0;				// log 'slow' threshold for query
 
@@ -3730,9 +3731,6 @@ bool ParseSearchQuery ( InputBuffer_c & tReq, ISphOutputBuffer & tOut, CSphQuery
 			int iSelectLen = tQuery.m_sSelect.Length();
 			tQuery.m_sSelect = ( iSelectLen>4 ? tQuery.m_sSelect.SubString ( 4, iSelectLen-4 ) : "*" );
 		}
-		// fixup select list
-		if ( tQuery.m_sSelect.IsEmpty () )
-			tQuery.m_sSelect = "*";
 
 		CSphString sError;
 		if ( !tQuery.ParseSelectList ( sError ) )
@@ -3921,6 +3919,42 @@ void LogQueryPlain ( const CSphQuery & tQuery, const CSphQueryResult & tRes )
 	{
 #endif
 
+    //tBuf += "deineMama\n";
+
+  //  CSphConfigParser tCfg;
+ //   const CSphConfig & hConf = tCfg.m_tConf;
+//    const CSphConfigSection & hSearchdpre = hConf["searchd"]["searchd"];
+    //int iLogFormat = hSearchdpre["query_log_extended"].intval();
+      
+    if (g_eLogExtended == 1) 
+    {
+        ARRAY_FOREACH ( i, tQuery.m_dFilters )
+        {
+            int numValues  = tQuery.m_dFilters[i].GetNumValues();
+            if (numValues > 0) {
+                const CSphString & sCol = tQuery.m_dFilters[i].m_sAttrName;
+                const SphAttr_t *logValues  = tQuery.m_dFilters[i].GetValueArray();
+                ESphFilter eType = tQuery.m_dFilters[i].m_eType;
+                tBuf.Appendf(" [filter %s]", sCol.cstr());
+
+                switch (eType) {
+                    case SPH_FILTER_VALUES:
+                        for (int iCnt=0; iCnt < numValues; iCnt++) 
+                        {
+                            tBuf.Appendf(" [%lld]", logValues[iCnt]);
+                        } 
+                        break;
+                    case SPH_FILTER_RANGE:
+                        break;
+                    case SPH_FILTER_STRING:
+                        tBuf.Appendf(" [%s] ", tQuery.m_dFilters[i].m_sRefString.cstr());
+                        break;
+                    default:
+                        break;
+                }
+            }
+        }
+    }
 	// line feed
 	tBuf += "\n";
 
@@ -13256,40 +13290,10 @@ static void ReturnZeroCount ( const CSphRsetSchema & tSchema, int iAttrsCount, c
 {
 	for ( int i=0; i<iAttrsCount; i++ )
 	{
-		const CSphColumnInfo & tCol = tSchema.GetAttr(i);
-
-		if ( tCol.m_sName==sName ) // @count or its alias
+		if ( tSchema.GetAttr(i).m_sName==sName )
 			dRows.PutNumeric<DWORD> ( "%u", 0 );
 		else
-		{
-			// essentially the same as SELECT_DUAL, parse and print constant expressions
-			ESphAttr eAttrType;
-			CSphString sError;
-			ISphExpr * pExpr = sphExprParse ( tCol.m_sName.cstr(), tSchema, &eAttrType, NULL, sError, NULL );
-
-			if ( !pExpr || !pExpr->IsConst() )
-				eAttrType = SPH_ATTR_NONE;
-
-			CSphMatch tMatch;
-			const BYTE * pStr = NULL;
-
-			switch ( eAttrType )
-			{
-				case SPH_ATTR_STRINGPTR:
-					pExpr->StringEval ( tMatch, &pStr );
-					dRows.PutString ( (const char*)pStr );
-					SafeDelete ( pStr );
-					break;
-				case SPH_ATTR_INTEGER:	dRows.PutNumeric<int> ( "%d", pExpr->IntEval ( tMatch ) ); break;
-				case SPH_ATTR_BIGINT:	dRows.PutNumeric<SphAttr_t> ( INT64_FMT, pExpr->Int64Eval ( tMatch ) ); break;
-				case SPH_ATTR_FLOAT:	dRows.PutNumeric<float> ( "%f", pExpr->Eval ( tMatch ) ); break;
-				default:
-					dRows.PutNULL();
-					break;
-			}
-
-			SafeDelete ( pExpr );
-		}
+			dRows.PutNULL();
 	}
 	dRows.Commit();
 }
@@ -21280,6 +21284,11 @@ int WINAPI ServiceMain ( int argc, char **argv )
 	}
 	if ( g_bLogCompactIn && g_eLogFormat==LOG_FORMAT_PLAIN )
 		sphWarning ( "compact_in option only supported with query_log_format=sphinxql" );
+
+    const int iLogExtended = hSearchd.GetInt("query_log_extended");
+    if (iLogExtended == 1) {
+       g_eLogExtended = 1; 
+    }
 
 	// prepare to detach
 	if ( !g_bOptNoDetach )
