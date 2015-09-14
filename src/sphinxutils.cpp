@@ -498,6 +498,7 @@ static KeyDesc_t g_dKeysSearchd[] =
 	{ "listen",					KEY_LIST, NULL },
 	{ "log",					0, NULL },
 	{ "query_log",				0, NULL },
+	{ "query_log_extended",		0, NULL },
 	{ "read_timeout",			0, NULL },
 	{ "client_timeout",			0, NULL },
 	{ "max_children",			0, NULL },

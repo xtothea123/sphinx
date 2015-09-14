@@ -137,7 +137,6 @@ static CSphString		g_sLogFile;								// log file name
 static bool				g_bLogTty			= false;			// cached isatty(g_iLogFile)
 static bool				g_bLogStdout		= true;				// extra copy of startup log messages to stdout; true until around "accepting connections", then MUST be false
 static LogFormat_e		g_eLogFormat		= LOG_FORMAT_PLAIN;
-static int              g_eLogExtended      = 0;
 static bool				g_bLogCompactIn		= false;			// whether to cut list in IN() clauses.
 static int				g_iQueryLogMinMsec	= 0;				// log 'slow' threshold for query
 
@@ -160,6 +159,8 @@ static int				g_iShutdownTimeout	= 3000000; // default timeout on daemon shutdow
 static int				g_iBacklog			= SEARCHD_BACKLOG;
 static int				g_iThdPoolCount		= 2;
 static int				g_iThdQueueMax		= 0;
+
+static int              g_eLogExtended      = 0;
 
 struct Listener_t
 {
@@ -3920,18 +3921,16 @@ void LogQueryPlain ( const CSphQuery & tQuery, const CSphQueryResult & tRes )
 #endif
 
     //tBuf += "deineMama\n";
-
-  //  CSphConfigParser tCfg;
- //   const CSphConfig & hConf = tCfg.m_tConf;
-//    const CSphConfigSection & hSearchdpre = hConf["searchd"]["searchd"];
-    //int iLogFormat = hSearchdpre["query_log_extended"].intval();
-      
-    if (g_eLogExtended == 1) 
+    // extended logging, logging filters 
+    if (g_eLogExtended > 0) 
     {
         ARRAY_FOREACH ( i, tQuery.m_dFilters )
         {
-            int numValues  = tQuery.m_dFilters[i].GetNumValues();
-            if (numValues > 0) {
+            int numValues               = tQuery.m_dFilters[i].GetNumValues();
+            const SphAttr_t * logValues =  tQuery.m_dFilters[i].GetValueArray();
+
+            if (numValues > 0 || sizeof(logValues) > 0) 
+            {
                 const CSphString & sCol = tQuery.m_dFilters[i].m_sAttrName;
                 const SphAttr_t *logValues  = tQuery.m_dFilters[i].GetValueArray();
                 ESphFilter eType = tQuery.m_dFilters[i].m_eType;
@@ -3939,10 +3938,18 @@ void LogQueryPlain ( const CSphQuery & tQuery, const CSphQueryResult & tRes )
 
                 switch (eType) {
                     case SPH_FILTER_VALUES:
-                        for (int iCnt=0; iCnt < numValues; iCnt++) 
+                        if (numValues > 0) 
                         {
-                            tBuf.Appendf(" [%lld]", logValues[iCnt]);
-                        } 
+                            tBuf.Appendf(" [");
+                            for (int iCnt=0; iCnt < numValues; iCnt++) 
+                            {
+                                tBuf.Appendf("%lld", logValues[iCnt]);
+                                if (iCnt+1 < numValues) {
+                                    tBuf.Appendf(",");
+                                }
+                            } 
+                            tBuf.Appendf("]");
+                        }
                         break;
                     case SPH_FILTER_RANGE:
                         break;
@@ -20514,6 +20521,9 @@ void ConfigureSearchd ( const CSphConfig & hConf, bool bOptPIDFile )
 	g_iThrottleAccept = hSearchd.GetInt ( "net_throttle_accept", g_iThrottleAccept );
 	g_iNetWorkers = hSearchd.GetInt ( "net_workers", g_iNetWorkers );
 	g_iNetWorkers = Max ( g_iNetWorkers, 1 );
+    
+    // query log extended
+    g_eLogExtended = hSearchd.GetInt("query_log_extended", g_eLogExtended);
 
 	if ( hSearchd ( "collation_libc_locale" ) )
 	{
@@ -21284,11 +21294,6 @@ int WINAPI ServiceMain ( int argc, char **argv )
 	}
 	if ( g_bLogCompactIn && g_eLogFormat==LOG_FORMAT_PLAIN )
 		sphWarning ( "compact_in option only supported with query_log_format=sphinxql" );
-
-    const int iLogExtended = hSearchd.GetInt("query_log_extended");
-    if (iLogExtended == 1) {
-       g_eLogExtended = 1; 
-    }
 
 	// prepare to detach
 	if ( !g_bOptNoDetach )
